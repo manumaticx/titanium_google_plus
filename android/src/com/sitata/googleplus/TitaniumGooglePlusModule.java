@@ -11,7 +11,6 @@ package com.sitata.googleplus;
 import java.util.HashMap;
 import java.util.logging.Logger;
 
-import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollFunction;
 import org.appcelerator.kroll.KrollModule;
 import org.appcelerator.kroll.annotations.Kroll;
@@ -296,15 +295,8 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 
 	// Methods
 	@Kroll.method
-	public void signin(KrollDict props)
+	public void signin()
 	{
-		if (props.containsKey("success")) {
-			successCallback = (KrollFunction) props.get("success");
-		}
-		if (props.containsKey("error")) {
-			errorCallback = (KrollFunction) props.get("error");
-		}
-
 		if (mGoogleApiClient == null) {
 			buildClient();
 		}
