@@ -8,8 +8,6 @@
  */
 package com.sitata.googleplus;
 
-import java.io.IOException;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.logging.Logger;
 
@@ -23,20 +21,13 @@ import org.appcelerator.titanium.util.TiActivityResultHandler;
 import org.appcelerator.titanium.util.TiActivitySupport;
 
 import android.app.Activity;
-import android.app.Dialog;
 import android.content.Intent;
-import android.os.AsyncTask;
 import android.os.Bundle;
-import android.text.TextUtils;
 
-import com.google.android.gms.auth.GoogleAuthException;
-import com.google.android.gms.auth.GoogleAuthUtil;
-import com.google.android.gms.auth.GooglePlayServicesAvailabilityException;
-import com.google.android.gms.auth.UserRecoverableAuthException;
 import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.GooglePlayServicesUtil;
 import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.plus.Plus;
+import com.google.android.gms.plus.model.people.Person;
 
 
 
@@ -64,6 +55,10 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 	// Report and log the error as appropriate for your app.
 	@Kroll.constant
 	public static final String FATAL_EXCEPTION = "tigp:fatalException";
+	
+	// exposing Scope constants
+	@Kroll.constant public static final String SCOPE_LOGIN = "login";
+	@Kroll.constant public static final String SCOPE_PROFILE = "profile";
 
 	// Standard Debugging variables
 	private static final String TAG = "TitaniumGooglePlusModule";
@@ -80,11 +75,7 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 	private static GoogleApiClient mGoogleApiClient;
 
 	private Boolean mIntentInProgress = false;
-	private Boolean mFetchingToken = false;
 	private Boolean mClearingAccount = false;
-
-	// You can define constants with @Kroll.constant, for example:
-	// @Kroll.constant public static final String EXTERNAL_NAME = value;
 
 	public TitaniumGooglePlusModule()
 	{
@@ -141,7 +132,7 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 		Log.d(TAG, "Connected!");
 		// We've resolved any connection errors. mGoogleApiClient can be used
 		// to access Google APIs on behalf of the user.
-
+		
 		// After calling connect(), this method will be invoked asynchronously
 		// when the connect request has successfully completed.
 		if (mClearingAccount) {
@@ -149,11 +140,33 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 			// been set to true prior to connecting
 			clearAccount();
 		} else {
-			if (!mFetchingToken) {
-				mFetchingToken = true;
-				mEmail = Plus.AccountApi.getAccountName(mGoogleApiClient);
-				fetchAccessToken();
+			
+			mEmail = Plus.AccountApi.getAccountName(mGoogleApiClient);
+			
+			if (hasListeners("login")) {
+				Person person = Plus.PeopleApi.getCurrentPerson(mGoogleApiClient);
+				
+				HashMap<String, Object> data = new HashMap<String, Object>();
+				data.put("id", person.getId());
+				data.put("email", mEmail);
+				data.put("image", person.getImage().getUrl());
+				data.put("name", person.getName().getFormatted());
+				data.put("givenName", person.getName().getGivenName());
+				data.put("familyName", person.getName().getFamilyName());
+				data.put("nickname", person.getNickname());
+				data.put("gender", person.getGender());
+				data.put("about", person.getAboutMe());
+				data.put("birthday", person.getBirthday());
+				data.put("url", person.getUrl());
+				data.put("currentLocation", person.getCurrentLocation());
+				data.put("isPlusUser", person.isPlusUser());
+				
+				HashMap<String, Object> event = new HashMap<String, Object>();
+				event.put("success", true);
+				event.put("data", data);
+				fireEvent("login", event);
 			}
+			
 		}
 	}
 
@@ -200,7 +213,7 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 				// Titanium) and the code RC_SIGN_IN, we can
 				// capture the result inside Activity.onActivityResult.
 				if (!mGoogleApiClient.isConnecting()) {
-					Log.d(TAG, "Connectiong again");
+					Log.d(TAG, "Connecting again");
 					mGoogleApiClient.connect();
 				}
 			} else {
@@ -208,7 +221,6 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 			}
 
 		} else if (thisRequestCode == recoveryRequestCode) {
-			mFetchingToken = false;
 			// At this point, the user has chosen an account and we have
 			// attempted to fetch information
 			// but the user might have needed to grant permissions still and
@@ -229,7 +241,6 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 	}
 
 	private void handleSignInSuccess(String email, String token) {
-		mFetchingToken = false;
 		HashMap<String, String> event = new HashMap<String, String>();
 		event.put("accountId", email);
 		event.put("accessToken", token);
@@ -260,70 +271,28 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 
 	private void handleError(String code) {
 		mIntentInProgress = false;
-		mFetchingToken = false;
 
-		HashMap<String, String> event = new HashMap<String, String>();
+		HashMap<String, Object> event = new HashMap<String, Object>();
 		event.put("error", code);
 		errorCallback.call(getKrollObject(), event);
+		
+		if (hasListeners("login")) {
+			event.put("success", false);
+			fireEvent("login", event);
+		}
+		
 	}
-
-
-	private void handleRecoverableException(Intent recoveryIntent) {
-		Logger.getLogger(TAG).info("Launchng recoverable intent.");
-
-		// Use the intent in a custom dialog or just startActivityForResult.
-		Activity activity = TiApplication.getAppCurrentActivity();
-		TiActivitySupport support = (TiActivitySupport) activity;
-		recoveryRequestCode = support.getUniqueResultCode();
-		support.launchActivityForResult(recoveryIntent, recoveryRequestCode,
-				this);
-
-	}
-
-	private void handleGooglePlayException(
-			GooglePlayServicesAvailabilityException playEx) {
-		// Use the dialog to present to the user.
-		Activity activity = TiApplication.getAppCurrentActivity();
-		Dialog dialog = GooglePlayServicesUtil.getErrorDialog(
-				playEx.getConnectionStatusCode(), activity, -99); // -99 temporary request code
-		dialog.show();
-	}
-
 
 	// Build the google api client
 	private void buildClient() {
 		Activity activity = TiApplication.getAppCurrentActivity();
-		GoogleApiClient.Builder builder = new GoogleApiClient.Builder(activity)
+		mGoogleApiClient = new GoogleApiClient.Builder(activity)
 				.addConnectionCallbacks(this)
-				.addOnConnectionFailedListener(this).addApi(Plus.API);
-
-		if (Arrays.asList(mScopes).contains("profile")) {
-			Log.d(TAG, "Adding profile scope.");
-			builder.addScope(Plus.SCOPE_PLUS_PROFILE);
-		}
-
-		mGoogleApiClient = builder.build();
+				.addOnConnectionFailedListener(this)
+				.addApi(Plus.API)
+				.addScope(Plus.SCOPE_PLUS_LOGIN)
+				.build();
 	}
-
-	// Now that mEmail exists and we know the accountId and have signed in to
-	// GooglePlus Oauth,
-	// use the GoogleAuthUtil to fetch the auth token
-	private void fetchAccessToken() {
-		String scopeStr = TextUtils.join(" ", mScopes);
-
-		// This allows scope array to be specified as ['profile', 'email']
-		// or something like: ['audience:server:client_id:<client_id>']
-		String check = scopeStr.substring(0, 5);
-		if (check != "oauth" || check != "audie") {
-			// if token doesn't begin with 'oauth2:' or 'audience:'
-			scopeStr = "oauth2:" + scopeStr;
-		}
-
-		FetchUserTokenTask task = new FetchUserTokenTask(TiApplication.getAppCurrentActivity(), mEmail, scopeStr);
-		task.execute();
-	}
-
-
 
 	// Methods
 	@Kroll.method
@@ -348,17 +317,26 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 
 	@Kroll.method
 	public void signout() {
-		// TODO
+		
+		if(mGoogleApiClient != null) {
+            if (mGoogleApiClient.isConnected()) {
+                mGoogleApiClient.disconnect();
+                mGoogleApiClient.connect();
+            }
+        }
+		
+		successCallback = null;
+		errorCallback = null;
 	}
 
 	@Kroll.method
 	public void disconnect() {
-		// TODO
+		mGoogleApiClient.disconnect();
 	}
 
 	@Kroll.method
 	public Boolean isLoggedIn() {
-		return false; // TODO
+		return mGoogleApiClient != null && mGoogleApiClient.isConnected();
 	}
 
 	// Properties
@@ -387,74 +365,6 @@ public class TitaniumGooglePlusModule extends KrollModule implements
 	public Object[] getScopes() {
 		return mScopes;
 	}
-
-	public class FetchUserTokenTask extends AsyncTask {
-		Activity mActivity;
-		String mScope;
-		String mEmail;
-		private static final String TAG = "TiGoogleAuthUtilModule";
-
-		FetchUserTokenTask(Activity activity, String name, String scope) {
-			this.mActivity = activity;
-			this.mScope = scope;
-			this.mEmail = name;
-		}
-
-		/**
-		 * Executes the asynchronous job. This runs when you call execute() on
-		 * the AsyncTask instance.
-		 */
-		@Override
-		protected Object doInBackground(Object... arg0) {
-			try {
-				String token = fetchToken();
-				if (token != null) {
-					Logger.getLogger(TAG).info(
-							"Found token for email: " + mEmail + " - " + token);
-					handleSignInSuccess(mEmail, token);
-				}
-			} catch (IOException e) {
-				// The fetchToken() method handles Google-specific exceptions,
-				// so this indicates something went wrong at a higher level.
-				// TIP: Check for network connectivity before starting the
-				// AsyncTask.
-				Logger.getLogger(TAG).info("IOException: " + e.getMessage());
-				handleError(IO_EXCEPTION);
-			}
-			return null;
-		}
-
-		/**
-		 * Gets an authentication token from Google and handles any
-		 * GoogleAuthException that may occur.
-		 */
-		protected String fetchToken() throws IOException {
-			try {
-				Logger.getLogger(TAG).info(
-						"Fetching token from google using account: '" + mEmail
-								+ "' and scope: '" + mScope + "'.");
-				return GoogleAuthUtil.getToken(mActivity, mEmail, mScope);
-			} catch (GooglePlayServicesAvailabilityException playEx) {
-				Logger.getLogger(TAG).info(
-						"Google Play Exception: " + playEx.getMessage());
-				handleGooglePlayException(playEx);
-			} catch (UserRecoverableAuthException userRecoverableException) {
-				Logger.getLogger(TAG).info(
-						"User Recoverable Exception: "
-								+ userRecoverableException.getMessage());
-				handleRecoverableException(userRecoverableException
-						.getIntent());
-			} catch (GoogleAuthException fatalException) {
-				Logger.getLogger(TAG).info(
-						"Fatal Exception: " + fatalException.getMessage());
-				handleError(FATAL_EXCEPTION);
-			}
-			return null;
-		}
-
-	}
-
-
 
 }
 
